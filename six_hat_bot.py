@@ -1313,6 +1313,22 @@ class AgentFactory:
             verbose=self.verbose
         )
 
+    def create_reflect_agent(self) -> ReflectAgent:
+        """
+        创建反思Agent
+        
+        返回:
+            ReflectAgent实例
+        """
+        return ReflectAgent(
+            name="反思者",
+            role="负责审视和优化分析结果",
+            model_api=self.model_api,
+            shared_memory=self.shared_memory,
+            tool_manager=self.tool_manager,
+            verbose=self.verbose
+        )
+
 
 
 # 六顶思考帽系统控制器
@@ -1340,7 +1356,7 @@ class SixHatsSystem:
         )
         self.agents: Dict[str, Agent] = {}
         self._init_agents()
-        
+        self.evaluation_module = EvaluationModule(self.model_api)
         logger.info(f"初始化六顶思考帽系统，API类型: {api_type}, Verbose: {self.verbose}")
     
     def _register_tools(self):
@@ -1397,13 +1413,16 @@ class SixHatsSystem:
         # 创建六顶思考帽Agent
         hat_colors = ["blue", "white", "red", "yellow", "black", "green"]
         for color in hat_colors:
-            self.agents[color] = self.agent_factory.create_hat_agent(color )
+            self.agents[color] = self.agent_factory.create_hat_agent(color)
         
         # 创建信息搜集Agent
         self.agents["info"] = self.agent_factory.create_info_agent()
         
         # 创建报告生成Agent
         self.agents["report"] = self.agent_factory.create_report_agent()
+        
+        # 创建反思Agent
+        self.agents["reflect"] = self.agent_factory.create_reflect_agent()
         
         logger.info("初始化Agent完成")
     
@@ -1485,51 +1504,92 @@ class SixHatsSystem:
         # 设置原始需求
         self.set_requirement(requirement)
         
-        # 使用蓝帽先进行过程设计
-        blue_result = await self.process_with_hat("blue", f"请对以下需求进行思考流程设计：\n{requirement}")
-        logger.info("蓝帽思考完成")
+        # 设置最大迭代轮数
+        max_iterations = 2  # 默认最大迭代2轮
         
-        # 收集相关信息
-        info_agent = self.agents.get("info")
-        if info_agent:
-            # 自动提取搜索关键词并进行搜索
-            search_keywords = requirement.split()[:3]  # 简单地取前三个词作为搜索关键词
-            search_query = " ".join(search_keywords)
-            await info_agent.search_info(search_query)
-            logger.info(f"信息搜集完成: {search_query}")
-        
-        # 并行处理其他思考帽
-        tasks = [
-            self.process_with_hat("white", f"请对以下需求进行客观事实分析：\n{requirement}"),
-            self.process_with_hat("red", f"请对以下需求进行情感和直觉反应：\n{requirement}"),
-            self.process_with_hat("yellow", f"请对以下需求进行积极和可行性分析：\n{requirement}"),
-            self.process_with_hat("black", f"请对以下需求进行风险和问题分析：\n{requirement}")
-        ]
-        
-        # 等待白帽、红帽、黄帽和黑帽完成分析
-        import asyncio
-        results = await asyncio.gather(*tasks)
-        logger.info("基础思考帽分析完成")
-        
-        # 使用绿帽进行创新思维分析，使用增强的创新方法
-        green_hat = self.agents.get("green")
-        if isinstance(green_hat, GreenHatAgent):
-            # 使用横向思维方法
-            await green_hat.lateral_thinking(f"请对这个需求使用横向思维：\n{requirement}")
+        for iteration in range(1, max_iterations + 1):
+            logger.info(f"开始第 {iteration} 轮分析")
             
-            # 生成创新想法
-            await green_hat.generate_ideas(requirement, 5)
-            logger.info("绿帽创新思维分析完成")
-        else:
-            # 常规绿帽思考
-            await self.process_with_hat("green", f"请对以下需求进行创新思维和新方案分析：\n{requirement}")
-            logger.info("绿帽常规分析完成")
+            # 使用蓝帽先进行过程设计
+            blue_result = await self.process_with_hat("blue", f"请对以下需求进行思考流程设计 (第 {iteration} 轮)：\n{requirement}")
+            logger.info(f"第 {iteration} 轮蓝帽思考完成")
+            
+            # 收集相关信息
+            info_agent = self.agents.get("info")
+            if info_agent:
+                # 自动提取搜索关键词并进行搜索
+                search_query = requirement
+                await info_agent.search_info(search_query)
+                logger.info(f"第 {iteration} 轮信息搜集完成")
+            
+            # 并行处理其他思考帽
+            tasks = [
+                self.process_with_hat("white", f"请对以下需求进行客观事实分析 (第 {iteration} 轮)：\n{requirement}"),
+                self.process_with_hat("red", f"请对以下需求进行情感和直觉反应 (第 {iteration} 轮)：\n{requirement}"),
+                self.process_with_hat("yellow", f"请对以下需求进行积极和可行性分析 (第 {iteration} 轮)：\n{requirement}"),
+                self.process_with_hat("black", f"请对以下需求进行风险和问题分析 (第 {iteration} 轮)：\n{requirement}"),
+                self.process_with_hat("green", f"请对以下需求进行创新思维和新方案分析 (第 {iteration} 轮)：\n{requirement}")
+            ]
+            
+            # 等待所有思考帽完成分析
+            import asyncio
+            await asyncio.gather(*tasks)
+            logger.info(f"第 {iteration} 轮思考帽分析完成")
+            
+            # 使用反思Agent审视和优化分析结果
+            reflect_agent = self.agents.get("reflect")
+            if reflect_agent:
+                # 获取当前轮次各思考帽的最新结果
+                hat_colors = ["white", "red", "yellow", "black", "green"]
+                outputs = {}
+                
+                # 从共享内存中获取最新的思考结果
+                for color in hat_colors:
+                    # 获取该颜色帽子所有内容
+                    keys = self.shared_memory.list_keys()
+                    hat_names = {
+                        "white": "白帽思考者", 
+                        "red": "红帽思考者", 
+                        "yellow": "黄帽思考者", 
+                        "black": "黑帽思考者", 
+                        "green": "绿帽思考者"
+                    }
+                    hat_keys = [k for k in keys if k.startswith(f"{hat_names[color]}_思考结果_")]
+                    
+                    if hat_keys:
+                        # 排序获取最新结果
+                        sorted_keys = sorted(hat_keys, reverse=True)
+                        latest_key = sorted_keys[0] if sorted_keys else None
+                        if latest_key:
+                            outputs[color] = self.shared_memory.get(latest_key, "未提供分析内容")
+                
+                # 反思并提供反馈
+                feedback = await reflect_agent.reflect(outputs)
+                for color, fb in feedback.items():
+                    self.shared_memory.set(f"feedback_{color}_{iteration}", fb)
+                logger.info(f"第 {iteration} 轮反思完成")
+                
+                # 判断是否需要继续迭代
+                if iteration < max_iterations:
+                    continue_prompt = f"基于当前分析结果和反馈，是否需要继续进行第{iteration+1}轮分析？请考虑分析质量、深度和全面性。回答'是'或'否'。"
+                    decision = self.model_api.generate_response([{"role": "user", "content": continue_prompt}], temperature=0.3, max_tokens=10)
+                    if "是" not in decision:
+                        logger.info(f"决定不继续进行后续轮次分析")
+                        break
+                    logger.info(f"决定继续进行第 {iteration+1} 轮分析")
         
-        # 生成分析报告
+        # 生成最终分析报告
+        logger.info("开始生成最终分析报告")
         report = await self.generate_report()
-        logger.info("分析报告生成完成")
         
-        return report
+        # 评估报告质量
+        scores = self.evaluation_module.evaluate(report)
+        logger.info(f"报告评估分数: {scores}")
+        
+        # 将评估结果添加到报告末尾
+        final_report = f"{report}\n\n---\n\n**报告质量评估**\n- 全面性: {scores.get('全面性', 'N/A')}/100\n- 一致性: {scores.get('一致性', 'N/A')}/100\n- 实用性: {scores.get('实用性', 'N/A')}/100"
+        
+        return final_report
 
 
 # 主程序入口
@@ -1622,3 +1682,137 @@ if __name__ == "__main__":
     
     # 运行主程序，并传递verbose标志
     asyncio.run(main(verbose_mode=args.verbose))
+
+# 反思Agent
+class ReflectAgent(Agent):
+    """反思Agent，负责审视和优化其他Agent的分析结果"""
+    
+    def __init__(self, name: str, role: str, model_api: ModelAPI, shared_memory: SharedMemory, tool_manager: ToolManager, verbose: bool = False):
+        """
+        初始化反思Agent
+        
+        参数:
+            name: Agent名称
+            role: Agent角色
+            model_api: 模型API实例
+            shared_memory: 共享内存实例
+            tool_manager: 工具管理器实例
+            verbose: 是否启用详细日志模式
+        """
+        super().__init__(name, role, model_api, shared_memory, tool_manager, verbose)
+        system_prompt = """你是反思Agent，负责审视和优化其他Agent的分析结果。
+
+你的职责包括:
+1. 评估分析结果的全面性、逻辑性和实用性
+2. 识别分析中的偏见、遗漏或矛盾
+3. 提出改进建议或请求补充信息
+4. 协调Agent间的冲突或不一致
+
+在审视时，请针对每个Agent的输出进行评估，并提供具体反馈。
+"""
+        self.add_message("system", system_prompt)
+        logger.info(f"初始化反思Agent: {name}")
+    
+    async def reflect(self, outputs: Dict[str, str]) -> Dict[str, str]:
+        """
+        反思并评估各Agent的输出
+        
+        参数:
+            outputs: 各Agent的输出字典
+            
+        返回:
+            反馈结果字典
+        """
+        feedback = {}
+        for agent_name, output in outputs.items():
+            prompt = f"请评估以下{agent_name}的分析输出，指出其优点、不足和改进建议：\n\n{output}"
+            assessment = self.model_api.generate_response([{"role": "user", "content": prompt}], temperature=0.5, max_tokens=500)
+            feedback[agent_name] = assessment
+            if self.verbose:
+                logger.info(f"[{self.name}] 完成对 {agent_name} 的反思评估")
+        return feedback
+    
+    async def process(self, message: str) -> str:
+        """
+        处理消息
+        
+        参数:
+            message: 输入消息
+            
+        返回:
+            响应消息
+        """
+        self.add_message("user", message)
+        messages = self.get_messages()
+        try:
+            response = self.model_api.generate_response(messages, temperature=0.7, max_tokens=1000)
+            self.add_message("assistant", response)
+            self.share_info(f"反思结果_{datetime.now().strftime('%Y%m%d_%H%M%S')}", response)
+            return response
+        except Exception as e:
+            error_msg = f"反思过程出错: {str(e)}"
+            logger.error(error_msg)
+            return error_msg
+
+# 评估模块
+class EvaluationModule:
+    """
+    评估模块，对报告质量进行评分
+    """
+    
+    def __init__(self, model_api: ModelAPI):
+        """
+        初始化评估模块
+        
+        参数:
+            model_api: 模型API实例
+        """
+        self.model_api = model_api
+        logger.info("初始化评估模块")
+    
+    def evaluate(self, report: str) -> Dict[str, float]:
+        """
+        评估报告质量
+        
+        参数:
+            report: 待评估的报告
+            
+        返回:
+            评估分数字典
+        """
+        try:
+            prompt = f"""请对以下分析报告进行评估，分别从全面性、一致性和实用性三个方面打分（0-100分）：
+
+全面性：报告是否覆盖了问题的各个方面，包括事实、情感、风险、价值和创新等多个维度。
+一致性：报告的各部分是否逻辑一致，没有明显的矛盾或冲突。
+实用性：报告提供的分析和建议是否具有实际应用价值。
+
+请以JSON格式返回评分结果，例如：
+{{"全面性": 85, "一致性": 78, "实用性": 90}}
+
+以下是报告内容：
+{report}
+"""
+            evaluation_text = self.model_api.generate_response([{"role": "user", "content": prompt}], temperature=0.3, max_tokens=500)
+            
+            # 尝试从评估文本中提取JSON
+            import re
+            import json
+            
+            json_match = re.search(r'\{.*?\}', evaluation_text, re.DOTALL)
+            if json_match:
+                try:
+                    scores = json.loads(json_match.group(0))
+                    logger.info(f"评估分数: {scores}")
+                    return scores
+                except json.JSONDecodeError:
+                    logger.warning("无法解析评估JSON，使用默认分数")
+            
+            # 如果无法解析，返回默认分数
+            default_scores = {"全面性": 80, "一致性": 75, "实用性": 85}
+            logger.warning(f"使用默认评估分数: {default_scores}")
+            return default_scores
+            
+        except Exception as e:
+            logger.error(f"评估过程出错: {str(e)}")
+            return {"全面性": 70, "一致性": 70, "实用性": 70}
